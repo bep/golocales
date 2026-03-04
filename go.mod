@@ -1,4 +1,4 @@
-module github.com/bep/golibtemplate
+module github.com/bep/golocales
 
 go 1.25
 

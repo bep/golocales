@@ -1,3 +1,3 @@
-[![Tests on Linux, MacOS and Windows](https://github.com/bep/golibtemplate/workflows/Test/badge.svg)](https://github.com/bep/golibtemplate/actions?query=workflow:Test)
-[![Go Report Card](https://goreportcard.com/badge/github.com/bep/golibtemplate)](https://goreportcard.com/report/github.com/bep/golibtemplate)
-[![GoDoc](https://godoc.org/github.com/bep/golibtemplate?status.svg)](https://godoc.org/github.com/bep/golibtemplate)
+[![Tests on Linux, MacOS and Windows](https://github.com/bep/golocales/workflows/Test/badge.svg)](https://github.com/bep/golocales/actions?query=workflow:Test)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bep/golocales)](https://goreportcard.com/report/github.com/bep/golocales)
+[![GoDoc](https://godoc.org/github.com/bep/golocales?status.svg)](https://godoc.org/github.com/bep/golocales)
