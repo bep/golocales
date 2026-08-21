@@ -74,7 +74,7 @@ func BuildParentLocaleMap(cldrData *cldr.CLDR) map[string]string {
 	sup := cldrData.Supplemental()
 	if sup.ParentLocales != nil {
 		for _, pl := range sup.ParentLocales.ParentLocale {
-			for _, loc := range strings.Fields(pl.Locales) {
+			for loc := range strings.FieldsSeq(pl.Locales) {
 				m[loc] = pl.Parent
 			}
 		}
