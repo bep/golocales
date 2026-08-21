@@ -47,7 +47,7 @@ func TestMergeIntoPartialMonths(t *testing.T) {
 	mergeInto(&child, &parent)
 
 	// First four wide months are from the child.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if child.MonthsWide[i] == parent.MonthsWide[i] {
 			t.Errorf("MonthsWide[%d]: expected child override %q, got parent value %q",
 				i, child.MonthsWide[i], parent.MonthsWide[i])
@@ -67,7 +67,7 @@ func TestMergeIntoPartialMonths(t *testing.T) {
 	}
 
 	// Abbreviated months were absent in the child, so all are inherited from the parent.
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		if child.MonthsAbbreviated[i] != parent.MonthsAbbreviated[i] {
 			t.Errorf("MonthsAbbreviated[%d]: expected %q from parent, got %q",
 				i, parent.MonthsAbbreviated[i], child.MonthsAbbreviated[i])
@@ -75,7 +75,7 @@ func TestMergeIntoPartialMonths(t *testing.T) {
 	}
 
 	// Weekdays were absent in the child, so all are inherited from the parent.
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		if child.WeekDaysWide[i] != parent.WeekDaysWide[i] {
 			t.Errorf("WeekDaysWide[%d]: expected %q from parent, got %q",
 				i, parent.WeekDaysWide[i], child.WeekDaysWide[i])
