@@ -4,6 +4,7 @@
 package golocales
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +211,55 @@ func TestFormatAccountingAndPercent(t *testing.T) {
 	pct := tr.FormatPercent(75.5, 1)
 	c.Assert(pct, qt.Contains, "75.5")
 	c.Assert(pct, qt.Contains, "%")
+}
+
+func TestFormatNegativeNumbers(t *testing.T) {
+	c := qt.New(t)
+
+	tests := []struct {
+		locale string
+		num    float64
+		got    func(Translator, float64) string
+		want   string
+	}{
+		{"en", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "USD") }, "-$1,234.50"},
+		{"en", -1234.5, func(tr Translator, n float64) string { return tr.FormatAccounting(n, 2, "USD") }, "($1,234.50)"},
+		{"en", 1234.5, func(tr Translator, n float64) string { return tr.FormatAccounting(n, 2, "USD") }, "$1,234.50"},
+		{"fr", -1234.5, func(tr Translator, n float64) string { return tr.FormatAccounting(n, 2, "EUR") }, "(1\u202f234,50\u00a0\u20ac)"},
+		{"de", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "EUR") }, "-1.234,50\u00a0\u20ac"},
+		{"pt-BR", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "BRL") }, "-R$\u00a01.234,50"},
+		{"sv", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "SEK") }, "\u22121\u00a0234,50\u00a0kr"},
+		// Explicit negative subpatterns.
+		{"fy", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "EUR") }, "\u20ac\u00a01.234,50-"},
+		{"de-CH", -1234.5, func(tr Translator, n float64) string { return tr.FormatCurrency(n, 2, "CHF") }, "CHF-1'234.50"},
+		{"en", math.NaN(), func(tr Translator, n float64) string { return tr.FormatAccounting(n, 2, "USD") }, "$NaN"},
+		{"tr", -12.5, func(tr Translator, n float64) string { return tr.FormatPercent(n, 1) }, "-%12,5"},
+		{"tr", 12.5, func(tr Translator, n float64) string { return tr.FormatPercent(n, 1) }, "%12,5"},
+	}
+
+	for _, tt := range tests {
+		tr := New(tt.locale)
+		c.Assert(tr, qt.Not(qt.IsNil))
+		c.Assert(tt.got(tr, tt.num), qt.Equals, tt.want, qt.Commentf("%s %v", tt.locale, tt.num))
+	}
+}
+
+func TestFormatPatternsAllLocales(t *testing.T) {
+	c := qt.New(t)
+	for _, l := range _locales {
+		tr := New(l.name)
+		c.Assert(tr, qt.Not(qt.IsNil))
+		for _, num := range []float64{1234.5, -1234.5} {
+			for _, s := range []string{
+				tr.FormatCurrency(num, 2, "USD"),
+				tr.FormatAccounting(num, 2, "USD"),
+				tr.FormatPercent(num, 1),
+			} {
+				c.Assert(s, qt.Not(qt.Contains), "#", qt.Commentf("%s %v", l.name, num))
+				c.Assert(s, qt.Not(qt.Contains), "\u00a4", qt.Commentf("%s %v", l.name, num))
+			}
+		}
+	}
 }
 
 func BenchmarkAll(b *testing.B) {

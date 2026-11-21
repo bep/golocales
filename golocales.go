@@ -294,51 +294,63 @@ func (t *translatorImpl) currencySymbol(code string) string {
 
 func (t *translatorImpl) FormatAccounting(num float64, p int, currency string) string {
 	symbol := t.currencySymbol(currency)
-	formatted := t.FormatNumber(num, p)
-
 	pattern := _strings[t.data.stdCurrencyPattern]
-	if pattern == "" {
-		return formatted + " " + symbol
+	if num < 0 {
+		// Keep the layout of the standard pattern, but use parentheses for
+		// negative numbers when the accounting pattern does so.
+		_, neg, _ := strings.Cut(_strings[t.data.acctCurrencyPattern], ";")
+		if strings.Contains(neg, "(") {
+			return "(" + t.formatNumberPattern(pattern, "¤", symbol, -num, p) + ")"
+		}
 	}
-
-	// Handle positive/negative subpatterns (separated by ";").
-	positive, _, _ := strings.Cut(pattern, ";")
-
-	// Replace ¤ with symbol and number pattern with formatted number.
-	result := strings.Replace(positive, "¤", symbol, 1)
-	numPattern := strings.TrimSpace(strings.Replace(positive, "¤", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-
-	return result
+	return t.formatNumberPattern(pattern, "¤", symbol, num, p)
 }
 
 func (t *translatorImpl) FormatPercent(num float64, p int) string {
-	formatted := t.FormatNumber(num, p)
-	pattern := _strings[t.data.percentPattern]
-	if pattern == "" {
-		return formatted + "%"
-	}
-	percentSym := _strings[t.data.percent]
-	result := strings.Replace(pattern, "%", percentSym, 1)
-	numPattern := strings.TrimSpace(strings.Replace(pattern, "%", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-	return result
+	return t.formatNumberPattern(_strings[t.data.percentPattern], "%", _strings[t.data.percent], num, p)
 }
 
 func (t *translatorImpl) FormatCurrency(num float64, p int, currency string) string {
-	symbol := t.currencySymbol(currency)
-	formatted := t.FormatNumber(num, p)
+	return t.formatNumberPattern(_strings[t.data.stdCurrencyPattern], "¤", t.currencySymbol(currency), num, p)
+}
 
-	pattern := _strings[t.data.stdCurrencyPattern]
+// formatNumberPattern formats num with p decimals using the CLDR number pattern,
+// which may hold a positive and a negative subpattern separated by ";".
+// The first occurrence of placeholder (e.g. ¤ or %) is replaced with symbol.
+// A negative number with no negative subpattern gets the locale's minus sign
+// in front of the positive pattern.
+func (t *translatorImpl) formatNumberPattern(pattern, placeholder, symbol string, num float64, p int) string {
 	if pattern == "" {
-		return formatted + " " + symbol
+		return t.FormatNumber(num, p) + " " + symbol
 	}
 
-	positive, _, _ := strings.Cut(pattern, ";")
-	result := strings.Replace(positive, "¤", symbol, 1)
-	numPattern := strings.TrimSpace(strings.Replace(positive, "¤", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-	return result
+	negative := num < 0
+	positive, negPattern, hasNeg := strings.Cut(pattern, ";")
+	minus := _strings[t.data.minus]
+
+	var prefix string
+	chosen := positive
+	if negative {
+		if hasNeg {
+			chosen = strings.ReplaceAll(negPattern, "-", minus)
+		} else {
+			prefix = minus
+		}
+	}
+
+	formatted := t.FormatNumber(math.Abs(num), p)
+
+	// Replace the number pattern, i.e. the first run of #, 0, comma and dot.
+	start := strings.IndexAny(chosen, "#0")
+	if start == -1 {
+		return prefix + strings.Replace(chosen, placeholder, symbol, 1)
+	}
+	end := start
+	for end < len(chosen) && strings.IndexByte("#0,.", chosen[end]) != -1 {
+		end++
+	}
+	result := chosen[:start] + formatted + chosen[end:]
+	return prefix + strings.Replace(result, placeholder, symbol, 1)
 }
 
 func (t *translatorImpl) FormatNumber(num float64, p int) string {
