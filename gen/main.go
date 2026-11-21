@@ -99,6 +99,7 @@ type localeEntry struct {
 	AcctCurrPattern   int
 	CurrencyOverrides int
 	TZNames           int
+	MinGroupingDigits int
 }
 
 // intern is a generic interning helper.
@@ -276,6 +277,7 @@ func buildGenData(locales map[string]internal.LocaleConfig, metazones map[string
 			StdCurrPattern:  strs.add(cfg.StandardPattern),
 			AcctCurrPattern: strs.add(cfg.AccountingPattern),
 		}
+		e.MinGroupingDigits = max(cfg.MinimumGroupingDigits, 1)
 		e.CurrencyOverrides = internOverride(cfg.CurrencySymbols)
 		e.TZNames = internTZNames(cfg.TZNames)
 		entries = append(entries, e)
@@ -315,6 +317,7 @@ type localeEntry struct {
 	stdCurrencyPattern, acctCurrencyPattern         uint16
 	currencyOverrides                               uint16
 	tzNames                                         uint16
+	minGroupingDigits                               uint8
 }
 
 type months [12]string
@@ -377,7 +380,7 @@ var _tzNames = [...][2][]kv{
 
 var _locales = [...]localeEntry{
 {{- range .Locales }}
-	{ {{ gostr .Name }}, {{ .MonthsAbbr }}, {{ .MonthsNarrow }}, {{ .MonthsWide }}, {{ .DaysAbbr }}, {{ .DaysNarrow }}, {{ .DaysShort }}, {{ .DaysWide }}, {{ .Decimal }}, {{ .Group }}, {{ .Minus }}, {{ .Percent }}, {{ .PerMille }}, {{ .Plus }}, {{ .PercentPattern }}, {{ .DateFull }}, {{ .DateLong }}, {{ .DateMedium }}, {{ .DateShort }}, {{ .TimeFull }}, {{ .TimeLong }}, {{ .TimeMedium }}, {{ .TimeShort }}, {{ .StdCurrPattern }}, {{ .AcctCurrPattern }}, {{ .CurrencyOverrides }}, {{ .TZNames }} },
+	{ {{ gostr .Name }}, {{ .MonthsAbbr }}, {{ .MonthsNarrow }}, {{ .MonthsWide }}, {{ .DaysAbbr }}, {{ .DaysNarrow }}, {{ .DaysShort }}, {{ .DaysWide }}, {{ .Decimal }}, {{ .Group }}, {{ .Minus }}, {{ .Percent }}, {{ .PerMille }}, {{ .Plus }}, {{ .PercentPattern }}, {{ .DateFull }}, {{ .DateLong }}, {{ .DateMedium }}, {{ .DateShort }}, {{ .TimeFull }}, {{ .TimeLong }}, {{ .TimeMedium }}, {{ .TimeShort }}, {{ .StdCurrPattern }}, {{ .AcctCurrPattern }}, {{ .CurrencyOverrides }}, {{ .TZNames }}, {{ .MinGroupingDigits }} },
 {{- end }}
 }
 `))

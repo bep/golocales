@@ -9,6 +9,7 @@ import (
 	"log"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/text/unicode/cldr"
@@ -399,6 +400,15 @@ func extractNumbers(ldml *cldr.LDML, lcfg *LocaleConfig) {
 		break
 	}
 
+	for _, mgd := range ldml.Numbers.MinimumGroupingDigits {
+		if mgd.Alt != "" {
+			continue
+		}
+		if v, err := strconv.Atoi(strings.TrimSpace(mgd.Data())); err == nil {
+			lcfg.MinimumGroupingDigits = v
+		}
+	}
+
 	// Extract percent format pattern.
 	for _, pf := range ldml.Numbers.PercentFormats {
 		if pf.NumberSystem != "" && pf.NumberSystem != "latn" {
@@ -437,7 +447,7 @@ func extractCurrencies(ldml *cldr.LDML, lcfg *LocaleConfig) {
 			}
 			for _, cfmt := range cfl.CurrencyFormat {
 				for _, p := range cfmt.Pattern {
-					if p.Alt != "" || p.Count != "" {
+					if p.Alt != "" || p.Count != "" || !isApproved(p.Draft) {
 						continue
 					}
 					switch cfmt.Type {
@@ -452,17 +462,31 @@ func extractCurrencies(ldml *cldr.LDML, lcfg *LocaleConfig) {
 		break
 	}
 
-	// Extract currency symbols.
+	// Extract currency symbols. Skip alternate forms such as alt="narrow"
+	// and alt="variant"; if a locale defines only an alternate form, the
+	// default symbol is inherited from the parent locale.
 	if ldml.Numbers.Currencies != nil {
 		for _, cur := range ldml.Numbers.Currencies.Currency {
-			if len(cur.Symbol) > 0 {
+			for _, sym := range cur.Symbol {
+				if sym.Alt != "" {
+					continue
+				}
 				if lcfg.CurrencySymbols == nil {
 					lcfg.CurrencySymbols = make(map[string]string)
 				}
-				lcfg.CurrencySymbols[cur.Type] = cur.Symbol[0].Data()
+				lcfg.CurrencySymbols[cur.Type] = sym.Data()
+				break
 			}
 		}
 	}
+}
+
+// isApproved reports whether CLDR data with the given draft status is
+// suitable for use. Like ICU, it accepts approved and contributed data, and
+// rejects provisional and unconfirmed data, which is then inherited from the
+// parent locale instead.
+func isApproved(draft string) bool {
+	return draft == "" || draft == "approved" || draft == "contributed"
 }
 
 // ResolveLocale builds a fully inherited localeConfig by walking up the
@@ -473,5 +497,17 @@ func ResolveLocale(loc string, cldrData *cldr.CLDR, parentOverrides map[string]s
 		parentCfg := extractFromLDML(cldrData.RawLDML(p))
 		mergeInto(&lcfg, &parentCfg)
 	}
+	resolveAliases(&lcfg)
 	return lcfg
+}
+
+// resolveAliases applies the locale-relative aliases defined in the CLDR
+// root locale, which extractFromLDML skips. Call it after inheritance so
+// that each alias resolves against the fully inherited locale.
+func resolveAliases(lcfg *LocaleConfig) {
+	// In root, the accounting currency format is an alias of the standard
+	// currency format.
+	if lcfg.AccountingPattern == "" {
+		lcfg.AccountingPattern = lcfg.StandardPattern
+	}
 }

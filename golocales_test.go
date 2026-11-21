@@ -51,9 +51,11 @@ func TestTranslator(t *testing.T) {
 	c.Assert(tr.FormatNumber(pi, 3), qt.Equals, "3,142")
 
 	c.Assert(tr.FormatNumber(1123456.5643, 2), qt.Equals, "1\u00a0123\u00a0456,56")
-	c.Assert(tr.FormatAccounting(550.5643, 2, "USD"), qt.Equals, "550,56\u00a0USD")
-	c.Assert(tr.FormatAccounting(123.567, 2, "NOK"), qt.Equals, "123,57\u00a0kr")
-	c.Assert(tr.FormatAccounting(123.567, 2, "NoK"), qt.Equals, "123,57\u00a0kr")
+	// nn inherits the accounting pattern "¤ #,##0.00;(¤ #,##0.00)" from no.
+	c.Assert(tr.FormatAccounting(550.5643, 2, "USD"), qt.Equals, "USD\u00a0550,56")
+	c.Assert(tr.FormatAccounting(-550.5643, 2, "USD"), qt.Equals, "(USD\u00a0550,56)")
+	c.Assert(tr.FormatAccounting(123.567, 2, "NOK"), qt.Equals, "kr\u00a0123,57")
+	c.Assert(tr.FormatAccounting(123.567, 2, "NoK"), qt.Equals, "kr\u00a0123,57")
 	c.Assert(tr.FormatPercent(15, 0), qt.Equals, "15\u00a0%")
 	c.Assert(tr.FormatCurrency(1123456.5643, 2, "USD"), qt.Equals, "1\u00a0123\u00a0456,56\u00a0USD")
 	c.Assert(tr.FormatCurrency(1123456.5643, 2, "NOK"), qt.Equals, "1\u00a0123\u00a0456,56\u00a0kr")
@@ -212,6 +214,113 @@ func TestFormatAccountingAndPercent(t *testing.T) {
 	c.Assert(pct, qt.Contains, "%")
 }
 
+// The expected values in the tests below match the output of ICU 78.2
+// (CLDR 48), as returned by the JavaScript Intl.NumberFormat API.
+
+func TestFormatCurrencyNegative(t *testing.T) {
+	c := qt.New(t)
+
+	for _, test := range []struct {
+		locale, currency, want string
+	}{
+		// The minus sign precedes the symbol.
+		{"en", "USD", "-$1,234.50"},
+		{"en", "EUR", "-€1,234.50"},
+		{"en_GB", "USD", "-US$1,234.50"},
+		{"ja", "JPY", "-\uffe51,234.50"},
+		// The locale defines a negative subpattern.
+		{"nl", "EUR", "€\u00a0-1.234,50"},
+		{"de_CH", "USD", "$-1'234.50"},
+		// The symbol follows the number.
+		{"de", "EUR", "-1.234,50\u00a0€"},
+		{"fr", "EUR", "-1\u202f234,50\u00a0€"},
+	} {
+		tr := New(test.locale)
+		c.Assert(tr.FormatCurrency(-1234.5, 2, test.currency), qt.Equals, test.want, qt.Commentf("%s %s", test.locale, test.currency))
+	}
+}
+
+func TestFormatAccountingNegative(t *testing.T) {
+	c := qt.New(t)
+
+	for _, test := range []struct {
+		locale, currency, want string
+	}{
+		{"en", "USD", "($1,234.50)"},
+		{"en_GB", "EUR", "(€1,234.50)"},
+		{"ja", "USD", "($1,234.50)"},
+		{"nl", "EUR", "(€\u00a01.234,50)"},
+		{"fr", "EUR", "(1\u202f234,50\u00a0€)"},
+		{"pl", "USD", "(1234,50\u00a0USD)"},
+		// de has no accounting pattern, so it uses its standard pattern.
+		{"de", "EUR", "-1.234,50\u00a0€"},
+		// de_CH defines no negative accounting subpattern.
+		{"de_CH", "USD", "$-1'234.50"},
+	} {
+		tr := New(test.locale)
+		c.Assert(tr.FormatAccounting(-1234.5, 2, test.currency), qt.Equals, test.want, qt.Commentf("%s %s", test.locale, test.currency))
+	}
+
+	// Positive values do not use the negative subpattern.
+	c.Assert(New("en").FormatAccounting(1234.5, 2, "USD"), qt.Equals, "$1,234.50")
+}
+
+func TestFormatCurrencySymbolNotNarrow(t *testing.T) {
+	c := qt.New(t)
+
+	// The root locale defines only a narrow symbol ("kr") for NOK, which
+	// must not be used as the default symbol.
+	c.Assert(New("de").FormatCurrency(512.5, 2, "NOK"), qt.Equals, "512,50\u00a0NOK")
+	c.Assert(New("de").FormatAccounting(512.5, 2, "NOK"), qt.Equals, "512,50\u00a0NOK")
+	// Locales that define their own symbol still use it.
+	c.Assert(New("nn").FormatCurrency(512.5, 2, "NOK"), qt.Equals, "512,50\u00a0kr")
+}
+
+func TestFormatCurrencySpacing(t *testing.T) {
+	c := qt.New(t)
+	tr := New("en")
+
+	// A no-break space separates a symbol that ends in a letter from the
+	// number.
+	c.Assert(tr.FormatCurrency(512.5, 2, "NOK"), qt.Equals, "NOK\u00a0512.50")
+	c.Assert(tr.FormatCurrency(-512.5, 2, "CHF"), qt.Equals, "-CHF\u00a0512.50")
+	c.Assert(tr.FormatAccounting(-512.5, 2, "NOK"), qt.Equals, "(NOK\u00a0512.50)")
+	c.Assert(tr.FormatCurrency(100, 2, "XYZ"), qt.Equals, "XYZ\u00a0100.00")
+
+	// No space is inserted if the symbol ends in a symbol character, even
+	// if it starts with letters.
+	c.Assert(tr.FormatCurrency(512.5, 2, "USD"), qt.Equals, "$512.50")
+	c.Assert(New("en_GB").FormatCurrency(512.5, 2, "USD"), qt.Equals, "US$512.50")
+}
+
+func TestFormatMinimumGroupingDigits(t *testing.T) {
+	c := qt.New(t)
+
+	// pl and es set minimumGroupingDigits to 2.
+	for _, locale := range []string{"pl", "es"} {
+		tr := New(locale)
+		group := map[string]string{"pl": "\u00a0", "es": "."}[locale]
+		c.Assert(tr.FormatNumber(1234.5, 2), qt.Equals, "1234,50", qt.Commentf(locale))
+		c.Assert(tr.FormatNumber(-1234.5, 2), qt.Equals, "-1234,50", qt.Commentf(locale))
+		c.Assert(tr.FormatNumber(12345.5, 2), qt.Equals, "12"+group+"345,50", qt.Commentf(locale))
+		c.Assert(tr.FormatNumber(1234567, 0), qt.Equals, "1"+group+"234"+group+"567", qt.Commentf(locale))
+	}
+	c.Assert(New("pl").FormatCurrency(1234.5, 2, "USD"), qt.Equals, "1234,50\u00a0USD")
+	c.Assert(New("pl").FormatCurrency(12345.5, 2, "USD"), qt.Equals, "12\u00a0345,50\u00a0USD")
+
+	// Most locales set minimumGroupingDigits to 1.
+	c.Assert(New("en").FormatNumber(1234.5, 2), qt.Equals, "1,234.50")
+	c.Assert(New("de").FormatNumber(1234.5, 2), qt.Equals, "1.234,50")
+}
+
+func TestFormatPercentNegative(t *testing.T) {
+	c := qt.New(t)
+
+	c.Assert(New("en").FormatPercent(-12.5, 1), qt.Equals, "-12.5%")
+	c.Assert(New("de").FormatPercent(-12.5, 1), qt.Equals, "-12,5\u00a0%")
+	c.Assert(New("tr").FormatPercent(-12.5, 1), qt.Equals, "-%12,5")
+}
+
 func BenchmarkAll(b *testing.B) {
 	tr := New("en")
 	loc, _ := time.LoadLocation("America/New_York")
@@ -250,6 +359,11 @@ func BenchmarkAll(b *testing.B) {
 	b.Run("FormatCurrency", func(b *testing.B) {
 		for range b.N {
 			tr.FormatCurrency(1234567.89, 2, "USD")
+		}
+	})
+	b.Run("FormatAccounting", func(b *testing.B) {
+		for range b.N {
+			tr.FormatAccounting(-1234567.89, 2, "USD")
 		}
 	})
 	b.Run("FormatPercent", func(b *testing.B) {

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // New returns a new Translator for the given locale,
@@ -292,53 +294,37 @@ func (t *translatorImpl) currencySymbol(code string) string {
 	return code
 }
 
+// Fallback patterns, used if a locale has no pattern of its own.
+const (
+	fallbackCurrencyPattern = "#,##0.00 ¤"
+	fallbackPercentPattern  = "#,##0%"
+)
+
 func (t *translatorImpl) FormatAccounting(num float64, p int, currency string) string {
-	symbol := t.currencySymbol(currency)
-	formatted := t.FormatNumber(num, p)
-
-	pattern := _strings[t.data.stdCurrencyPattern]
+	pattern := _strings[t.data.acctCurrencyPattern]
 	if pattern == "" {
-		return formatted + " " + symbol
+		pattern = _strings[t.data.stdCurrencyPattern]
 	}
-
-	// Handle positive/negative subpatterns (separated by ";").
-	positive, _, _ := strings.Cut(pattern, ";")
-
-	// Replace ¤ with symbol and number pattern with formatted number.
-	result := strings.Replace(positive, "¤", symbol, 1)
-	numPattern := strings.TrimSpace(strings.Replace(positive, "¤", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-
-	return result
+	if pattern == "" {
+		pattern = fallbackCurrencyPattern
+	}
+	return t.formatNumberPattern(pattern, num, p, t.currencySymbol(currency))
 }
 
 func (t *translatorImpl) FormatPercent(num float64, p int) string {
-	formatted := t.FormatNumber(num, p)
 	pattern := _strings[t.data.percentPattern]
 	if pattern == "" {
-		return formatted + "%"
+		pattern = fallbackPercentPattern
 	}
-	percentSym := _strings[t.data.percent]
-	result := strings.Replace(pattern, "%", percentSym, 1)
-	numPattern := strings.TrimSpace(strings.Replace(pattern, "%", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-	return result
+	return t.formatNumberPattern(pattern, num, p, "")
 }
 
 func (t *translatorImpl) FormatCurrency(num float64, p int, currency string) string {
-	symbol := t.currencySymbol(currency)
-	formatted := t.FormatNumber(num, p)
-
 	pattern := _strings[t.data.stdCurrencyPattern]
 	if pattern == "" {
-		return formatted + " " + symbol
+		pattern = fallbackCurrencyPattern
 	}
-
-	positive, _, _ := strings.Cut(pattern, ";")
-	result := strings.Replace(positive, "¤", symbol, 1)
-	numPattern := strings.TrimSpace(strings.Replace(positive, "¤", "", 1))
-	result = strings.Replace(result, numPattern, formatted, 1)
-	return result
+	return t.formatNumberPattern(pattern, num, p, t.currencySymbol(currency))
 }
 
 func (t *translatorImpl) FormatNumber(num float64, p int) string {
@@ -346,10 +332,162 @@ func (t *translatorImpl) FormatNumber(num float64, p int) string {
 	if negative {
 		num = -num
 	}
+	result := t.formatDigits(num, p)
+	if negative {
+		result = _strings[t.data.minus] + result
+	}
+	return result
+}
 
+// Segment kinds produced when rendering a CLDR number pattern.
+const (
+	segLiteral = iota
+	segNumber
+	segCurrency
+)
+
+type patternSegment struct {
+	kind int
+	s    string
+}
+
+// formatNumberPattern formats num with p decimal places according to a CLDR
+// number pattern such as "¤#,##0.00;(¤#,##0.00)" or "#,##0 %". The pattern
+// determines the position of the currency symbol, percent sign, and minus
+// sign, and any surrounding literal text. The grouping and decimal
+// separators come from the locale, and p overrides the number of fraction
+// digits in the pattern.
+//
+// If num is negative, the negative subpattern (after the ";") is used. If
+// the pattern has no negative subpattern, the result is the localized minus
+// sign followed by the positive subpattern.
+func (t *translatorImpl) formatNumberPattern(pattern string, num float64, p int, symbol string) string {
+	negative := num < 0
+	if negative {
+		num = -num
+	}
+
+	positive, negPattern, hasNeg := strings.Cut(pattern, ";")
+	pat := positive
+	prefixMinus := false
+	if negative {
+		if hasNeg {
+			pat = negPattern
+		} else {
+			prefixMinus = true
+		}
+	}
+
+	digits := t.formatDigits(num, p)
+
+	var segs []patternSegment
+	addLiteral := func(s string) {
+		if n := len(segs); n > 0 && segs[n-1].kind == segLiteral {
+			segs[n-1].s += s
+			return
+		}
+		segs = append(segs, patternSegment{segLiteral, s})
+	}
+
+	numberDone := false
+	for i := 0; i < len(pat); {
+		r, size := utf8.DecodeRuneInString(pat[i:])
+		switch {
+		case r == '\'':
+			// Quoted literal text; a doubled quote is a literal quote.
+			i++
+			if i < len(pat) && pat[i] == '\'' {
+				addLiteral("'")
+				i++
+				continue
+			}
+			end := strings.IndexByte(pat[i:], '\'')
+			if end < 0 {
+				end = len(pat) - i
+			}
+			addLiteral(pat[i : i+end])
+			i += end + 1
+		case r == '¤':
+			for i < len(pat) && strings.HasPrefix(pat[i:], "¤") {
+				i += len("¤")
+			}
+			segs = append(segs, patternSegment{segCurrency, symbol})
+		case r == '%':
+			addLiteral(_strings[t.data.percent])
+			i += size
+		case r == '‰':
+			addLiteral(_strings[t.data.perMille])
+			i += size
+		case r == '-':
+			addLiteral(_strings[t.data.minus])
+			i += size
+		case r == '+':
+			addLiteral(_strings[t.data.plus])
+			i += size
+		case isNumberPatternChar(r):
+			for i < len(pat) && isNumberPatternChar(rune(pat[i])) {
+				i++
+			}
+			if !numberDone {
+				segs = append(segs, patternSegment{segNumber, digits})
+				numberDone = true
+			}
+		default:
+			addLiteral(pat[i : i+size])
+			i += size
+		}
+	}
+
+	var buf strings.Builder
+	for i, seg := range segs {
+		if i > 0 && needsCurrencySpacing(segs[i-1], seg) {
+			buf.WriteString("\u00a0")
+		}
+		buf.WriteString(seg.s)
+	}
+
+	result := buf.String()
+	if prefixMinus {
+		result = _strings[t.data.minus] + result
+	}
+	return result
+}
+
+func isNumberPatternChar(r rune) bool {
+	return r == '#' || r == ',' || r == '.' || r == '@' || (r >= '0' && r <= '9')
+}
+
+// needsCurrencySpacing reports whether a space must be inserted between two
+// adjacent pattern segments, implementing the currencySpacing rules defined
+// in the CLDR root locale, which no other locale overrides: if the currency
+// symbol is directly next to the number, and the symbol's character nearest
+// the number is neither a symbol (category S) nor a separator (category Z),
+// insert a no-break space. For example, "NOK1.00" becomes "NOK 1.00", while
+// "$1.00" and "US$1.00" do not change.
+func needsCurrencySpacing(prev, next patternSegment) bool {
+	var r rune
+	switch {
+	case prev.kind == segCurrency && next.kind == segNumber:
+		r, _ = utf8.DecodeLastRuneInString(prev.s)
+	case prev.kind == segNumber && next.kind == segCurrency:
+		r, _ = utf8.DecodeRuneInString(next.s)
+	default:
+		return false
+	}
+	if r == utf8.RuneError {
+		return false
+	}
+	return !unicode.IsSymbol(r) && !unicode.Is(unicode.Z, r)
+}
+
+// formatDigits formats the absolute value of num with p decimal places,
+// using the locale's decimal and grouping separators. It applies the locale's
+// minimum grouping digits, so with a value of 2, 1234 is formatted without a
+// grouping separator but 12345 is formatted with one.
+func (t *translatorImpl) formatDigits(num float64, p int) string {
 	decimal := _strings[t.data.decimal]
 	group := _strings[t.data.group]
-	minus := _strings[t.data.minus]
+	minGrouping := max(int(t.data.minGroupingDigits), 1)
 
 	// Round to the requested precision.
 	if p > 0 {
@@ -363,8 +501,10 @@ func (t *translatorImpl) FormatNumber(num float64, p int) string {
 	// Split into integer and fractional parts.
 	intPart, fracPart, hasFrac := strings.Cut(s, ".")
 
-	// Add grouping separators to the integer part (groups of 3 from the right).
-	if group != "" && len(intPart) > 3 {
+	// Add grouping separators to the integer part (groups of 3 from the
+	// right), but only if at least minGrouping digits precede the first
+	// separator.
+	if group != "" && len(intPart) >= 3+minGrouping {
 		var buf strings.Builder
 		start := len(intPart) % 3
 		if start == 0 {
@@ -378,17 +518,10 @@ func (t *translatorImpl) FormatNumber(num float64, p int) string {
 		intPart = buf.String()
 	}
 
-	var result string
 	if hasFrac {
-		result = intPart + decimal + fracPart
-	} else {
-		result = intPart
+		return intPart + decimal + fracPart
 	}
-
-	if negative {
-		result = minus + result
-	}
-	return result
+	return intPart
 }
 
 // kvLookup does a binary search on a sorted slice of kv pairs.
