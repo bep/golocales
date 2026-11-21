@@ -47,6 +47,10 @@ type NumberConfig struct {
 	PerMille       string
 	Plus           string
 	PercentPattern string
+	// MinimumGroupingDigits is the minimum number of digits that must
+	// precede the first grouping separator. With a value of 2, 1234 is
+	// formatted as "1234" but 12345 is formatted as "12 345".
+	MinimumGroupingDigits int
 }
 
 type DateTimeConfig struct {
