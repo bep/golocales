@@ -1,5 +1,4 @@
 [![Tests on Linux, MacOS and Windows](https://github.com/bep/golocales/workflows/Test/badge.svg)](https://github.com/bep/golocales/actions?query=workflow:Test)
-[![Go Report Card](https://goreportcard.com/badge/github.com/bep/golocales)](https://goreportcard.com/report/github.com/bep/golocales)
 [![GoDoc](https://godoc.org/github.com/bep/golocales?status.svg)](https://godoc.org/github.com/bep/golocales)
 
 A narrow API for locale aware date and number fornmatting using CLDR 48.1:
